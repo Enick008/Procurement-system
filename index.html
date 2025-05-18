@@ -414,48 +414,49 @@
     }
     // -- Chart Drawing --
     function drawCharts(records, TYPE_OPTIONS, STATUS_OPTIONS) {
-      // Chart1: type
-      const typeStats = TYPE_OPTIONS.map(type=>records.filter(r=>r.type===type).length);
-      if (window.chartType) window.chartType.destroy();
-      const ctx1 = document.getElementById('chartType');
-      if (ctx1) {
-        window.chartType = new Chart(ctx1, {
-          type: 'doughnut',
-          data: {
-            labels: TYPE_OPTIONS,
-            datasets: [{
-              data: typeStats,
-              backgroundColor: ['#6366f1','#0ea5e9','#fbbf24','#f43f5e'],
-            }]
-          },
-          options: {
-            plugins: { legend: { display: true, position: "bottom" } },
-            cutout: "60%",
-            responsive: true,
-          }
-        });
+  // Chart1: type
+  const typeStats = TYPE_OPTIONS.map(type=>records.filter(r=>r.type===type).length);
+  if (window.chartType && typeof window.chartType.destroy === "function") window.chartType.destroy();
+  const ctx1 = document.getElementById('chartType');
+  if (ctx1) {
+    window.chartType = new Chart(ctx1, {
+      type: 'doughnut',
+      data: {
+        labels: TYPE_OPTIONS,
+        datasets: [{
+          data: typeStats,
+          backgroundColor: ['#6366f1','#0ea5e9','#fbbf24','#f43f5e'],
+        }]
+      },
+      options: {
+        plugins: { legend: { display: true, position: "bottom" } },
+        cutout: "60%",
+        responsive: true,
       }
-      // Chart2: status
-      const statusStats = STATUS_OPTIONS.map(status=>records.filter(r=>r.status===status).length);
-      if (window.chartStatus) window.chartStatus.destroy();
-      const ctx2 = document.getElementById('chartStatus');
-      if (ctx2) {
-        window.chartStatus = new Chart(ctx2, {
-          type: 'pie',
-          data: {
-            labels: STATUS_OPTIONS,
-            datasets: [{
-              data: statusStats,
-              backgroundColor: ['#64748b','#eab308','#22c55e','#ef4444'],
-            }]
-          },
-          options: {
-            plugins: { legend: { display: true, position: "bottom" } },
-            responsive: true,
-          }
-        });
+    });
+  }
+  // Chart2: status
+  const statusStats = STATUS_OPTIONS.map(status=>records.filter(r=>r.status===status).length);
+  if (window.chartStatus && typeof window.chartStatus.destroy === "function") window.chartStatus.destroy();
+  const ctx2 = document.getElementById('chartStatus');
+  if (ctx2) {
+    window.chartStatus = new Chart(ctx2, {
+      type: 'pie',
+      data: {
+        labels: STATUS_OPTIONS,
+        datasets: [{
+          data: statusStats,
+          backgroundColor: ['#64748b','#eab308','#22c55e','#ef4444'],
+        }]
+      },
+      options: {
+        plugins: { legend: { display: true, position: "bottom" } },
+        responsive: true,
       }
-    }
+    });
+  }
+}
+
     // -- Render --
     ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
   </script>
