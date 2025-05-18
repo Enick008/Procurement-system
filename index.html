@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ระบบทะเบียนคุมจัดซื้อ-จัดจ้าง</title>
+  <!-- React & ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- SweetAlert2 -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;700&family=Noto+Sans+Thai:wght@400;700&display=swap" rel="stylesheet"/>
+  <style>
+    body { font-family: 'Prompt', 'Noto Sans Thai', sans-serif; background: #f5f8fc; color: #374151; min-height: 100vh; margin: 0;}
+    .swal2-popup { font-family: 'Prompt', 'Noto Sans Thai', sans-serif;}
+    .modal-bg { background: rgba(60,60,90,0.08); backdrop-filter: blur(2px);}
+    .hide-scroll::-webkit-scrollbar { display: none; }
+    .hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+
+    // ----- Config -----
+    const API_URL = "https://script.google.com/macros/s/AKfycbyu02LNLmRQqFuAw8m8xCUFiMm3Lg2-MB9uYG9YHmhFePuzJ2qV8yp9IDEKXttWpA2kxw/exec";
+    const SHEET_NAME = "RS";
+
+    // ----- Util -----
+    function formatNumber(n) {
+      if (!n) return "-";
+      return Number(n).toLocaleString("th-TH", {minimumFractionDigits:2, maximumFractionDigits:2});
+    }
+    function todayString() {
+      const d = new Date();
+      return d.toISOString().slice(0,10);
+    }
+    // API Helper
+    async function apiFetch(action, data={}) {
+      const payload = {
+        action,
+        sheetName: SHEET_NAME,
+        ...data
+      };
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: JSON.stringify(payload)
+      });
+      return await res.json();
+    }
+
+    // ----- React App -----
+    function App() {
+      // --- State ---
+      const [records, setRecords] = React.useState([]);
+      const [loading, setLoading] = React.useState(true);
+      const [modalOpen, setModalOpen] = React.useState(false);
+      const [modalEdit, setModalEdit] = React.useState(null); // record object or null
+      const [search, setSearch] = React.useState("");
+      const [sortKey, setSortKey] = React.useState("date");
+      const [sortDir, setSortDir] = React.useState("desc");
+      // --- Type/Status/Method ---
+      const TYPE_OPTIONS = ["จัดซื้อ", "จัดจ้าง", "สัญญาซื้อขาย", "สัญญาจ้าง"];
+      const STATUS_OPTIONS = ["รอดำเนินการ", "อยู่ระหว่างดำเนินการ", "เบิกจ่ายแล้ว", "ยกเลิก"];
+      const METHOD_OPTIONS = ["วิธีเฉพาะเจาะจง", "วิธีคัดเลือก", "วิธีประกวดราคา (e-bidding)", "วิธีสอบราคา", "วิธีพิเศษ"];
+      // --- Load Data ---
+      async function loadRecords() {
+        setLoading(true);
+        try {
+          const res = await apiFetch("getAll");
+          setRecords(Array.isArray(res.data) ? res.data : []);
+        } catch (e) {
+          Swal.fire({icon:"error",title:"ดึงข้อมูลจากเซิร์ฟเวอร์ไม่ได้"});
+        }
+        setLoading(false);
+      }
+      React.useEffect(() => { loadRecords(); }, []);
+
+      // --- Modal ---
+      function openModalEdit(record) { setModalEdit(record); setModalOpen(true);}
+      function openModalNew() { setModalEdit(null); setModalOpen(true);}
+      function closeModal() { setModalOpen(false);}
+      // --- CRUD ---
+      async function saveRecord(r) {
+        // Validate
+        if (!r.docNo || !r.type || !r.year || !r.date || !r.work || !r.priceStd || !r.priceActual || !r.method || !r.projNo || !r.vendor || !r.status) {
+          Swal.fire({icon:"error",title:"กรุณากรอกข้อมูลให้ครบถ้วน"}); return false;
+        }
+        let res;
+        if (r.id) { // edit
+          res = await apiFetch("edit", {data: r});
+        } else { // add
+          res = await apiFetch("add", {data: r});
+        }
+        if (res.success) {
+          Swal.fire({icon:"success",title: r.id?"แก้ไขข้อมูลสำเร็จ":"บันทึกข้อมูลสำเร็จ",timer:1200,showConfirmButton:false});
+          setModalOpen(false); loadRecords();
+          return true;
+        } else {
+          Swal.fire({icon:"error",title: res.message||"เกิดข้อผิดพลาด"}); return false;
+        }
+      }
+      async function delRecord(id) {
+        const result = await Swal.fire({
+          icon: "warning", title: "ยืนยันการลบข้อมูล?", text: "คุณต้องการลบข้อมูลรายการนี้ใช่หรือไม่?",
+          showCancelButton: true, confirmButtonText: "ลบ", cancelButtonText: "ยกเลิก", confirmButtonColor: "#e11d48"
+        });
+        if (!result.isConfirmed) return;
+        const res = await apiFetch("delete", {id});
+        if (res.success) {
+          Swal.fire({icon:"success",title:"ลบข้อมูลสำเร็จ",timer:1200,showConfirmButton:false});
+          loadRecords();
+        } else {
+          Swal.fire({icon:"error",title: res.message||"ลบข้อมูลไม่สำเร็จ"});
+        }
+      }
+      // --- Search/Sort ---
+      function getFiltered() {
+        let arr = records;
+        if (search.trim()) {
+          const s = search.trim();
+          arr = arr.filter(r=>
+            (r.docNo||"").includes(s) ||
+            (r.type||"").includes(s) ||
+            (r.year||"").includes(s)
+          );
+        }
+        return arr;
+      }
+      function sortFn(a, b) {
+        let vA = a[sortKey], vB = b[sortKey];
+        if (sortKey==="priceStd"||sortKey==="priceActual") {
+          vA = Number(vA); vB = Number(vB);
+        }
+        if (vA<vB) return sortDir==="asc"?-1:1;
+        if (vA>vB) return sortDir==="asc"?1:-1;
+        return 0;
+      }
+      const tableData = React.useMemo(()=>{
+        return getFiltered().sort(sortFn);
+      }, [records, search, sortKey, sortDir]);
+
+      // --- Chart ---
+      React.useEffect(()=>{
+        drawCharts(records, TYPE_OPTIONS, STATUS_OPTIONS);
+      }, [records]);
+
+      // --- Render ---
+      return (
+        <div className="min-h-screen flex flex-col">
+          {/* Header */}
+          <header className="flex flex-col items-center py-3">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/b/b1/Seal_of_Ko_Samui.png"
+                 alt="โลโก้ระบบ"
+                 className="h-24 w-24 object-contain mb-2"/>
+            <div className="text-xl font-bold text-purple-600">ระบบทะเบียนคุมจัดซื้อ-จัดจ้าง</div>
+          </header>
+          <main className="flex-1 container max-w-6xl mx-auto px-2 md:px-8 pb-16">
+            {/* Dashboard Card */}
+            <section className="grid md:grid-cols-4 gap-4 mb-4">
+              <DashStat title="มูลค่ารวมทั้งหมด" value={formatNumber(records.reduce((sum, r)=>sum+Number(r.priceActual||0),0))+" บาท"} icon="paid" color="bg-blue-100"/>
+              <DashStat title="รายการจัดซื้อ" value={records.filter(r=>r.type==="จัดซื้อ").length+" รายการ"} icon="shopping_cart" color="bg-purple-100"/>
+              <DashStat title="รายการจัดจ้าง" value={records.filter(r=>r.type==="จัดจ้าง").length+" รายการ"} icon="engineering" color="bg-cyan-100"/>
+              <DashStat title="สัญญาซื้อ/จ้าง" value={records.filter(r=>r.type==="สัญญาซื้อขาย"||r.type==="สัญญาจ้าง").length+" รายการ"} icon="description" color="bg-amber-100"/>
+            </section>
+            {/* Chart */}
+            <section className="grid md:grid-cols-2 gap-4 mb-4">
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <div className="text-base font-bold text-purple-600 mb-2 flex items-center">
+                  <span className="material-icons mr-1 text-xl text-indigo-400">pie_chart</span>
+                  สัดส่วนประเภท
+                </div>
+                <canvas id="chartType" height="130"></canvas>
+              </div>
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <div className="text-base font-bold text-purple-600 mb-2 flex items-center">
+                  <span className="material-icons mr-1 text-xl text-green-400">donut_large</span>
+                  สถานะทั้งหมด
+                </div>
+                <canvas id="chartStatus" height="130"></canvas>
+              </div>
+            </section>
+            {/* Table + Toolbar */}
+            <section className="bg-white rounded-xl shadow-lg p-6 mt-3">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-4">
+                <div className="font-bold text-purple-600 text-lg flex items-center">
+                  <span className="material-icons text-purple-400 mr-1">table_chart</span>
+                  รายการทั้งหมด <span className="ml-2 text-base text-gray-500">({tableData.length} รายการ)</span>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="relative">
+                    <input
+                      className="rounded-lg border-gray-300 px-3 py-1 w-48 md:w-60 text-base text-gray-700 shadow-sm focus:border-purple-400 focus:ring-2 focus:ring-purple-200"
+                      placeholder="ค้นหาเลขที่เอกสาร, ประเภท, ปีงบฯ..."
+                      value={search}
+                      onChange={e=>setSearch(e.target.value)}
+                    />
+                    <span className="material-icons absolute top-2 right-2 text-gray-300">search</span>
+                  </div>
+                  <button className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-1 rounded-lg shadow flex items-center font-medium"
+                    onClick={openModalNew}>
+                    <span className="material-icons mr-1">add_circle</span>
+                    เพิ่มข้อมูลใหม่
+                  </button>
+                </div>
+              </div>
+              {/* Table */}
+              <div className="overflow-x-auto hide-scroll">
+              <table className="min-w-full text-base">
+                <thead>
+                  <tr>
+                    <TableHeader label="เลขที่เอกสาร" sortKey="docNo" {...{sortKey, sortDir, setSortKey, setSortDir}}/>
+                    <TableHeader label="ประเภท" sortKey="type" {...{sortKey, sortDir, setSortKey, setSortDir}}/>
+                    <TableHeader label="ปีงบประมาณ" sortKey="year" {...{sortKey, sortDir, setSortKey, setSortDir}}/>
+                    <TableHeader label="วันที่ซื้อ/จ้าง" sortKey="date" {...{sortKey, sortDir, setSortKey, setSortDir}}/>
+                    <TableHeader label="งานที่ซื้อ/จ้าง" sortKey="work" {...{sortKey, sortDir, setSortKey, setSortDir}}/>
+                    <TableHeader label="ราคากลาง" sortKey="priceStd" {...{sortKey, sortDir, setSortKey, setSortDir}}/>
+                    <TableHeader label="ราคาตกลง" sortKey="priceActual" {...{sortKey, sortDir, setSortKey, setSortDir}}/>
+                    <TableHeader label="วิธีการซื้อ/จ้าง" sortKey="method" {...{sortKey, sortDir, setSortKey, setSortDir}}/>
+                    <TableHeader label="เลขที่โครงการ" sortKey="projNo" {...{sortKey, sortDir, setSortKey, setSortDir}}/>
+                    <TableHeader label="ผู้ขาย/ผู้รับจ้าง" sortKey="vendor" {...{sortKey, sortDir, setSortKey, setSortDir}}/>
+                    <TableHeader label="สถานะ" sortKey="status" {...{sortKey, sortDir, setSortKey, setSortDir}}/>
+                    <th className="py-2 text-center">จัดการ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading &&
+                    <tr><td colSpan="12" className="text-center py-6 text-gray-400">กำลังโหลดข้อมูล...</td></tr>
+                  }
+                  {!loading && tableData.length===0 &&
+                    <tr><td colSpan="12" className="text-center py-6 text-gray-400">ไม่มีข้อมูล</td></tr>
+                  }
+                  {!loading && tableData.map(r=>(
+                    <tr key={r.id} className="hover:bg-blue-50 transition-colors">
+                      <td className="py-2 px-2">{r.docNo}</td>
+                      <td className="py-2 px-2">{r.type}</td>
+                      <td className="py-2 px-2 text-center">{r.year}</td>
+                      <td className="py-2 px-2 text-center">{r.date}</td>
+                      <td className="py-2 px-2">{r.work}</td>
+                      <td className="py-2 px-2 text-right">{formatNumber(r.priceStd)}</td>
+                      <td className="py-2 px-2 text-right">{formatNumber(r.priceActual)}</td>
+                      <td className="py-2 px-2">{r.method}</td>
+                      <td className="py-2 px-2">{r.projNo}</td>
+                      <td className="py-2 px-2">{r.vendor}</td>
+                      <td className="py-2 px-2 text-center">
+                        <span className={
+                          "inline-flex items-center px-2 rounded text-white text-xs font-bold " +
+                          (r.status==="เบิกจ่ายแล้ว" ? "bg-green-500" :
+                           r.status==="รอดำเนินการ" ? "bg-gray-400" :
+                           r.status==="อยู่ระหว่างดำเนินการ" ? "bg-yellow-400" :
+                           "bg-red-400")
+                        }>
+                          {r.status}
+                        </span>
+                      </td>
+                      <td className="py-2 px-2 text-center">
+                        <button className="text-blue-500 hover:text-blue-700 mx-1"
+                          onClick={()=>openModalEdit(r)}>
+                          <span className="material-icons">edit</span>
+                        </button>
+                        <button className="text-red-500 hover:text-red-700 mx-1"
+                          onClick={()=>delRecord(r.id)}>
+                          <span className="material-icons">delete</span>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              </div>
+            </section>
+          </main>
+          {/* Modal */}
+          {modalOpen &&
+            <FormModal
+              record={modalEdit}
+              onClose={closeModal}
+              onSave={saveRecord}
+              TYPE_OPTIONS={TYPE_OPTIONS}
+              STATUS_OPTIONS={STATUS_OPTIONS}
+              METHOD_OPTIONS={METHOD_OPTIONS}
+            />
+          }
+          {/* Footer */}
+          <footer className="py-4 text-center text-gray-500 text-base">
+            © 2025 ระบบทะเบียนคุมจัดซื้อ-จัดจ้าง กองช่างสุขาภิบาล โดยนายธีรศักดิ์ พูลเขาล้าน
+          </footer>
+        </div>
+      );
+    }
+    // -- Components --
+    function DashStat({title, value, icon, color}) {
+      return (
+        <div className={`${color} rounded-xl shadow-lg p-6 flex flex-col items-center`}>
+          <span className="material-icons text-3xl mb-2">{icon}</span>
+          <div className="text-base font-bold text-purple-600">{title}</div>
+          <div className="text-lg font-bold text-gray-700">{value}</div>
+        </div>
+      );
+    }
+    function TableHeader({label, sortKey: sk, sortKey, sortDir, setSortKey, setSortDir}) {
+      return (
+        <th
+          className="cursor-pointer select-none px-2 py-2 text-gray-700 text-center hover:text-purple-700"
+          onClick={()=>{
+            if (sortKey===sk) setSortDir(sortDir==="asc"?"desc":"asc");
+            else { setSortKey(sk); setSortDir("asc"); }
+          }}>
+          <div className="flex items-center justify-center gap-1">
+            {label}
+            {sortKey===sk &&
+              <span className="material-icons text-xs">
+                {sortDir==="asc"?"arrow_upward":"arrow_downward"}
+              </span>
+            }
+          </div>
+        </th>
+      );
+    }
+    function FormModal({record, onClose, onSave, TYPE_OPTIONS, STATUS_OPTIONS, METHOD_OPTIONS}) {
+      const [data, setData] = React.useState(record?{...record}:{type:TYPE_OPTIONS[0], method:METHOD_OPTIONS[0], status:STATUS_OPTIONS[0], date:todayString(), year: (new Date().getFullYear()+543).toString()});
+      function handleInput(e) {
+        setData({...data, [e.target.name]:e.target.value});
+      }
+      function handleSave() {
+        // Validate all required
+        if (!data.docNo || !data.type || !data.year || !data.date || !data.work ||
+          !data.priceStd || !data.priceActual || !data.method || !data.projNo || !data.vendor || !data.status) {
+          Swal.fire({icon:"error",title:"กรุณากรอกข้อมูลให้ครบถ้วน"}); return;
+        }
+        if (!/^[0-9]{4}$/.test(data.year)) {
+          Swal.fire({icon:"error",title:"ปีงบประมาณควรเป็นตัวเลข 4 หลัก"}); return;
+        }
+        if (isNaN(data.priceStd) || isNaN(data.priceActual) || Number(data.priceStd)<=0 || Number(data.priceActual)<=0) {
+          Swal.fire({icon:"error",title:"กรุณาระบุราคากลางและราคาตกลงเป็นตัวเลขมากกว่า 0"}); return;
+        }
+        onSave({...data, priceStd:Number(data.priceStd), priceActual:Number(data.priceActual)});
+      }
+      return (
+        <div className="fixed z-50 inset-0 flex items-center justify-center modal-bg">
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-xl p-6 relative animate-fadeIn">
+            <div className="text-lg font-bold text-purple-600 mb-2">
+              {record ? "แก้ไขข้อมูล" : "เพิ่มข้อมูลใหม่"}
+            </div>
+            <button className="absolute right-2 top-2 text-gray-400 hover:text-red-500" onClick={onClose}><span className="material-icons">close</span></button>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="font-semibold text-gray-700">เลขที่เอกสาร</label>
+                <input className="w-full border rounded-lg px-2 py-1 mt-1" name="docNo" value={data.docNo||""} onChange={handleInput} />
+              </div>
+              <div>
+                <label className="font-semibold text-gray-700">ประเภท</label>
+                <select className="w-full border rounded-lg px-2 py-1 mt-1" name="type" value={data.type||TYPE_OPTIONS[0]} onChange={handleInput}>
+                  {TYPE_OPTIONS.map(opt=><option key={opt}>{opt}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="font-semibold text-gray-700">ปีงบประมาณ</label>
+                <input className="w-full border rounded-lg px-2 py-1 mt-1" name="year" value={data.year||""} maxLength={4} onChange={handleInput} />
+              </div>
+              <div>
+                <label className="font-semibold text-gray-700">วันที่ซื้อ/จ้าง</label>
+                <input className="w-full border rounded-lg px-2 py-1 mt-1" type="date" name="date" value={data.date||todayString()} onChange={handleInput} />
+              </div>
+              <div>
+                <label className="font-semibold text-gray-700">งานที่ซื้อ/จ้าง</label>
+                <input className="w-full border rounded-lg px-2 py-1 mt-1" name="work" value={data.work||""} onChange={handleInput} />
+              </div>
+              <div>
+                <label className="font-semibold text-gray-700">ราคากลาง(บาท)</label>
+                <input className="w-full border rounded-lg px-2 py-1 mt-1" name="priceStd" value={data.priceStd||""} onChange={handleInput} type="number" min={0} />
+              </div>
+              <div>
+                <label className="font-semibold text-gray-700">ราคาตกลง(บาท)</label>
+                <input className="w-full border rounded-lg px-2 py-1 mt-1" name="priceActual" value={data.priceActual||""} onChange={handleInput} type="number" min={0} />
+              </div>
+              <div>
+                <label className="font-semibold text-gray-700">วิธีการซื้อ/จ้าง</label>
+                <select className="w-full border rounded-lg px-2 py-1 mt-1" name="method" value={data.method||METHOD_OPTIONS[0]} onChange={handleInput}>
+                  {METHOD_OPTIONS.map(opt=><option key={opt}>{opt}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="font-semibold text-gray-700">เลขที่โครงการ</label>
+                <input className="w-full border rounded-lg px-2 py-1 mt-1" name="projNo" value={data.projNo||""} onChange={handleInput} />
+              </div>
+              <div>
+                <label className="font-semibold text-gray-700">ผู้ขาย/ผู้รับจ้าง</label>
+                <input className="w-full border rounded-lg px-2 py-1 mt-1" name="vendor" value={data.vendor||""} onChange={handleInput} />
+              </div>
+              <div>
+                <label className="font-semibold text-gray-700">สถานะ</label>
+                <select className="w-full border rounded-lg px-2 py-1 mt-1" name="status" value={data.status||STATUS_OPTIONS[0]} onChange={handleInput}>
+                  {STATUS_OPTIONS.map(opt=><option key={opt}>{opt}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6 justify-end">
+              <button className="bg-gray-400 hover:bg-gray-500 text-white px-5 py-2 rounded-lg shadow" onClick={onClose}>ยกเลิก</button>
+              <button className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg shadow flex items-center" onClick={handleSave}>
+                <span className="material-icons mr-1">save</span>
+                บันทึก
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    // -- Chart Drawing --
+    function drawCharts(records, TYPE_OPTIONS, STATUS_OPTIONS) {
+      // Chart1: type
+      const typeStats = TYPE_OPTIONS.map(type=>records.filter(r=>r.type===type).length);
+      if (window.chartType) window.chartType.destroy();
+      const ctx1 = document.getElementById('chartType');
+      if (ctx1) {
+        window.chartType = new Chart(ctx1, {
+          type: 'doughnut',
+          data: {
+            labels: TYPE_OPTIONS,
+            datasets: [{
+              data: typeStats,
+              backgroundColor: ['#6366f1','#0ea5e9','#fbbf24','#f43f5e'],
+            }]
+          },
+          options: {
+            plugins: { legend: { display: true, position: "bottom" } },
+            cutout: "60%",
+            responsive: true,
+          }
+        });
+      }
+      // Chart2: status
+      const statusStats = STATUS_OPTIONS.map(status=>records.filter(r=>r.status===status).length);
+      if (window.chartStatus) window.chartStatus.destroy();
+      const ctx2 = document.getElementById('chartStatus');
+      if (ctx2) {
+        window.chartStatus = new Chart(ctx2, {
+          type: 'pie',
+          data: {
+            labels: STATUS_OPTIONS,
+            datasets: [{
+              data: statusStats,
+              backgroundColor: ['#64748b','#eab308','#22c55e','#ef4444'],
+            }]
+          },
+          options: {
+            plugins: { legend: { display: true, position: "bottom" } },
+            responsive: true,
+          }
+        });
+      }
+    }
+    // -- Render --
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+
+  </script>
+</body>
+</html>
